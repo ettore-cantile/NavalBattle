@@ -60,6 +60,44 @@ class GameViewModel : ViewModel() {
         printGridState("Reset Griglia Computer", _gameState.value.player2.grid)
     }
 
+    fun updatePlacementPreview(row: Int, col: Int) {
+        if (_gameState.value.phase != GamePhase.PLACEMENT || placementIndex >= shipsToPlace.size) {
+            // Se l'anteprima non è necessaria, assicurati che sia null
+            if (_gameState.value.placementPreview != null) {
+                _gameState.update { it.copy(placementPreview = null) }
+            }
+            return
+        }
+
+        val shipSize = shipsToPlace[placementIndex]
+        val isHorizontal = currentShipOrientation == ShipOrientation.HORIZONTAL
+        val grid = _gameState.value.player1.grid
+
+        val previewCoordinates = (0 until shipSize).map { i ->
+            val r = if (isHorizontal) row else row + i
+            val c = if (isHorizontal) col + i else col
+            r to c
+        }
+
+        // Controlla se le coordinate sono valide per il piazzamento
+        val isValid = previewCoordinates.all { (r, c) ->
+            canPlaceShip(grid, r, c, 1, false) // Controlla cella per cella
+        }
+
+        _gameState.update {
+            it.copy(placementPreview = PlacementPreview(previewCoordinates, isValid))
+        }
+    }
+
+    /**
+     * Rimuove l'anteprima (es. quando il cursore esce dalla griglia).
+     */
+    fun clearPlacementPreview() {
+        if (_gameState.value.placementPreview != null) {
+            _gameState.update { it.copy(placementPreview = null) }
+        }
+    }
+
     // =================================================================================
     // --- PIAZZAMENTO UMANO ---
     // =================================================================================

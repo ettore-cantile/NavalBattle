@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalAnimationApi::class)
+@file:OptIn(ExperimentalAnimationApi::class, ExperimentalComposeUiApi::class)
 
 package com.example.navalbattle.ui
 
@@ -14,9 +14,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -46,7 +49,9 @@ fun NavalBattleScreen(gameViewModel: GameViewModel) {
 fun PlacementPhase(gameViewModel: GameViewModel) {
     val gameState by gameViewModel.gameState.collectAsState()
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -64,7 +69,8 @@ fun PlacementPhase(gameViewModel: GameViewModel) {
             player = gameState.player1,
             onCellClick = { row, col -> gameViewModel.onCellClick(row, col) },
             isOpponentBoard = false,
-            phase = GamePhase.PLACEMENT
+            phase = GamePhase.PLACEMENT,
+            gameViewModel = gameViewModel // Passa il ViewModel per l'anteprima
         )
     }
 }
@@ -73,14 +79,15 @@ fun PlacementPhase(gameViewModel: GameViewModel) {
 fun BattlePhase(gameViewModel: GameViewModel) {
     val gameState by gameViewModel.gameState.collectAsState()
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
         // --- SEZIONE GRIGLIA NEMICA ---
         Text("Enemy Grid", fontSize = 18.sp, color = Color.White)
         Spacer(Modifier.height(8.dp))
-        // Usiamo un Composable dedicato per la griglia nemica e il suo messaggio animato
         EnemyBoardWithOverlay(
             gameState = gameState,
             onCellClick = { row, col -> gameViewModel.onCellClick(row, col) }
@@ -98,6 +105,7 @@ fun BattlePhase(gameViewModel: GameViewModel) {
             onCellClick = { _, _ -> },
             isOpponentBoard = false,
             phase = GamePhase.BATTLE
+            // Non passiamo il ViewModel qui perché l'anteprima non serve
         )
     }
 }
@@ -121,20 +129,15 @@ fun FinishedPhase(gameViewModel: GameViewModel) {
 
 // ------------------------ COMPONENTI UI RIUTILIZZABILI ------------------------
 
-/**
- * [SOLUZIONE] Isola la logica della griglia nemica e dell'animazione per risolvere l'errore di scope.
- */
 @Composable
 private fun EnemyBoardWithOverlay(gameState: GameState, onCellClick: (Int, Int) -> Unit) {
     Box(contentAlignment = Alignment.Center) {
-        // Layer 1: La griglia di gioco
         GameBoard(
             player = gameState.player2,
             onCellClick = onCellClick,
             isOpponentBoard = true,
             phase = GamePhase.BATTLE
         )
-        // Layer 2: Il messaggio animato. Ora non c'è più ambiguità di scope.
         AnimatedVisibility(
             visible = gameState.sunkMessage != null,
             enter = fadeIn() + scaleIn(),
@@ -153,20 +156,47 @@ private fun EnemyBoardWithOverlay(gameState: GameState, onCellClick: (Int, Int) 
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun GameBoard(
     player: Player,
     onCellClick: (Int, Int) -> Unit,
     isOpponentBoard: Boolean,
-    phase: GamePhase
+    phase: GamePhase,
+    gameViewModel: GameViewModel? = null // ViewModel opzionale per l'anteprima
 ) {
     val cellSize = 48.dp
     val gridSize = 5
+    val gameState by gameViewModel?.gameState?.collectAsState() ?: remember { mutableStateOf(null) }
+
     Box(
         modifier = Modifier
             .width(cellSize * gridSize)
             .height(cellSize * gridSize)
             .border(1.dp, Color.White)
+            .pointerInput(phase, gameViewModel) {
+                if (phase == GamePhase.PLACEMENT && gameViewModel != null) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val position = event.changes.first().position
+
+                            val col = (position.x / size.width * gridSize)
+                                .toInt()
+                                .coerceIn(0, gridSize - 1)
+                            val row = (position.y / size.height * gridSize)
+                                .toInt()
+                                .coerceIn(0, gridSize - 1)
+
+                            gameViewModel.updatePlacementPreview(row, col)
+
+                            if (event.type == PointerEventType.Exit) {
+                                gameViewModel.clearPlacementPreview()
+                            }
+                        }
+                    }
+                }
+            }
     ) {
         // Layer 1: Cella di base e indicatori
         Column {
@@ -177,13 +207,35 @@ fun GameBoard(
                     }
                 }
             }
-        }
-        // Layer 2: Disegno delle navi del giocatore (solo sulla sua griglia)
+        } // <-- ERRORE [RISOLTO]: La parentesi graffa è stata spostata qui
+
+        // Layer 2: Disegno delle navi del giocatore (già piazzate)
         if (!isOpponentBoard) {
             player.ships.forEach { ship ->
                 ShipDrawing(ship, cellSize)
             }
         }
+
+        // Layer 3: Anteprima di piazzamento
+        if (phase == GamePhase.PLACEMENT && !isOpponentBoard) {
+            gameState?.placementPreview?.let { preview ->
+                PlacementPreviewDrawing(preview, cellSize)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlacementPreviewDrawing(preview: PlacementPreview, cellSize: Dp) {
+    val color = if (preview.isValid) Color.Green.copy(alpha = 0.5f) else Color.Red.copy(alpha = 0.5f)
+
+    preview.coordinates.forEach { (row, col) ->
+        Box(
+            modifier = Modifier
+                .offset(x = cellSize * col, y = cellSize * row)
+                .size(cellSize)
+                .background(color)
+        )
     }
 }
 
