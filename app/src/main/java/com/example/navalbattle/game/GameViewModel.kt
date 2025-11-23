@@ -166,6 +166,14 @@ class GameViewModel : ViewModel() {
             newGrid[r][c] = cell.copy(status = newStatus)
             val updatedHuman = human.copy(grid = newGrid.map { it.toList() })
 
+            var sunkMessage: String? = null
+            if (newStatus == CellStatus.HIT) {
+                val hitShip = updatedHuman.ships.find { it.coordinates.contains(r to c) }
+                if (hitShip != null && isSunk(hitShip, updatedHuman.grid)) {
+                    sunkMessage = "Your ship is sunk!"
+                }
+            }
+
             val winner = checkForWinner(updatedHuman, _gameState.value.player2)
 
             _gameState.update {
@@ -173,6 +181,7 @@ class GameViewModel : ViewModel() {
                     player1 = updatedHuman,
                     winner = winner,
                     phase = if (winner != null) GamePhase.FINISHED else it.phase,
+                    sunkMessage = sunkMessage,
                     currentPlayer = it.player1
                 )
             }
