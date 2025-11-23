@@ -105,7 +105,6 @@ fun BattlePhase(gameViewModel: GameViewModel) {
             onCellClick = { _, _ -> },
             isOpponentBoard = false,
             phase = GamePhase.BATTLE
-            // Non passiamo il ViewModel qui perché l'anteprima non serve
         )
     }
 }
@@ -138,6 +137,9 @@ private fun EnemyBoardWithOverlay(gameState: GameState, onCellClick: (Int, Int) 
             isOpponentBoard = true,
             phase = GamePhase.BATTLE
         )
+        // --- CORREZIONE 2: Animazione "SHIP SUNK!" ---
+        // L'animazione ora viene mostrata correttamente perché è nel Box più esterno,
+        // che si occupa di sovrapporre gli elementi.
         AnimatedVisibility(
             visible = gameState.sunkMessage != null,
             enter = fadeIn() + scaleIn(),
@@ -181,12 +183,8 @@ fun GameBoard(
                             val event = awaitPointerEvent()
                             val position = event.changes.first().position
 
-                            val col = (position.x / size.width * gridSize)
-                                .toInt()
-                                .coerceIn(0, gridSize - 1)
-                            val row = (position.y / size.height * gridSize)
-                                .toInt()
-                                .coerceIn(0, gridSize - 1)
+                            val col = (position.x / size.width * gridSize).toInt().coerceIn(0, gridSize - 1)
+                            val row = (position.y / size.height * gridSize).toInt().coerceIn(0, gridSize - 1)
 
                             gameViewModel.updatePlacementPreview(row, col)
 
@@ -198,32 +196,48 @@ fun GameBoard(
                 }
             }
     ) {
-        // Layer 1: Cella di base e indicatori
+        // --- CORREZIONE 1: Riorganizzazione dei Layer ---
+
+        // Layer 1: Cella di base (solo sfondo e bordi)
         Column {
             (0 until gridSize).forEach { row ->
                 Row {
                     (0 until gridSize).forEach { col ->
+                        // GridCell ora disegna solo lo sfondo e gestisce il click
                         GridCell(player.grid[row][col], onCellClick, isOpponentBoard, phase, cellSize)
                     }
                 }
             }
-        } // <-- ERRORE [RISOLTO]: La parentesi graffa è stata spostata qui
+        }
 
-        // Layer 2: Disegno delle navi del giocatore (già piazzate)
+        // Layer 2: Disegno delle navi del giocatore (se visibili)
         if (!isOpponentBoard) {
             player.ships.forEach { ship ->
                 ShipDrawing(ship, cellSize)
             }
         }
 
-        // Layer 3: Anteprima di piazzamento
+        // Layer 3: Anteprima di piazzamento (se in fase di piazzamento)
         if (phase == GamePhase.PLACEMENT && !isOpponentBoard) {
             gameState?.placementPreview?.let { preview ->
                 PlacementPreviewDrawing(preview, cellSize)
             }
         }
+
+        // Layer 4: Indicatori di Colpito/Mancato (disegnati sopra tutto il resto)
+        Column {
+            player.grid.forEach { rowOfCells ->
+                Row {
+                    rowOfCells.forEach { cell ->
+                        // HitMissMarker disegna solo se la cella è HIT o MISS
+                        HitMissMarker(cell, cellSize)
+                    }
+                }
+            }
+        }
     }
 }
+
 
 @Composable
 private fun PlacementPreviewDrawing(preview: PlacementPreview, cellSize: Dp) {
@@ -248,17 +262,30 @@ private fun GridCell(cell: Cell, onCellClick: (Int, Int) -> Unit, isOpponentBoar
             .size(cellSize)
             .background(Color.Blue.copy(alpha = 0.5f))
             .border(0.5.dp, Color.White.copy(alpha = 0.3f))
-            .clickable(enabled = isClickable) { onCellClick(cell.row, cell.col) },
+            .clickable(enabled = isClickable) { onCellClick(cell.row, cell.col) }
+    ) {
+        // Ora questo Box è vuoto, i marker sono gestiti separatamente
+    }
+}
+
+// ---> NUOVO COMPOSABLE PER I MARKER <---
+@Composable
+fun HitMissMarker(cell: Cell, cellSize: Dp) {
+    Box(
+        modifier = Modifier.size(cellSize),
         contentAlignment = Alignment.Center
     ) {
         val marker = when (cell.status) {
             CellStatus.HIT -> "💥"
             CellStatus.MISS -> "💀"
-            else -> ""
+            else -> "" // Non disegna nulla se la cella è vuota o solo una nave
         }
-        Text(marker, fontSize = 24.sp)
+        if (marker.isNotEmpty()) {
+            Text(marker, fontSize = 24.sp)
+        }
     }
 }
+
 
 @Composable
 private fun ShipDrawing(ship: Ship, cellSize: Dp) {
