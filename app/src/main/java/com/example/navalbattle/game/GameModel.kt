@@ -5,7 +5,7 @@ package com.example.navalbattle.game
  */
 enum class GamePhase {
     PLACEMENT,
-    BATTLE,// Fase di piazzamento navi del giocatoreBATTLE,    // Fase di combattimento
+    BATTLE,// Fase di piazzamento navi del giocatore    // Fase di combattimento
     FINISHED   // Fase di fine partita
 } // ---> ERRORE [RISOLTO]: La parentesi graffa '{' è stata rimossa da dopo 'FINISHED'.
 
@@ -55,10 +55,14 @@ data class Player(
  * @param coordinates Le coordinate che la nave occuperebbe.
  * @param isValid Se la posizione è valida o no (per cambiare colore).
  */
+// in GameModel.kt
+
 data class PlacementPreview(
     val coordinates: List<Pair<Int, Int>>,
-    val isValid: Boolean
+    val isValid: Boolean,
+    val orientation: ShipOrientation
 )
+
 
 /**
  * Rappresenta l'intero stato del gioco in un dato momento.

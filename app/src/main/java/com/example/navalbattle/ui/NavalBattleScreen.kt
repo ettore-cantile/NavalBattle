@@ -3,7 +3,6 @@
 package com.example.navalbattle.ui
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,8 +30,34 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.scale
 import com.example.navalbattle.game.*
 import kotlin.math.roundToInt
+// Animations
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+
+// Animation Core
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.rememberInfiniteTransition
+
+// Compose UI
+import androidx.compose.ui.graphics.graphicsLayer
+
+// Coroutine
+import kotlinx.coroutines.delay
+
 
 // ---------- configurazione ----------
 private val CELL_SIZE: Dp = 64.dp
@@ -46,6 +71,76 @@ private val PREVIEW_BAD = Color(0x80FF5252)   // rosso semi
 private val SHIP_COLOR = Color(0xFF444444)
 
 // ------------------ NavalBattleScreen (entry) ------------------
+
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+fun GamePhaseContainer(
+    phase: GamePhase,
+    viewModel: GameViewModel
+) {
+
+    Box(modifier = Modifier.fillMaxSize()) {
+
+        // 1) Contenuto della fase
+        AnimatedContent(
+            targetState = phase,
+            transitionSpec = {
+                fadeIn(tween(300)) togetherWith fadeOut(tween(300))
+            },
+            modifier = Modifier.fillMaxSize()
+        ) { targetPhase ->
+
+            when (targetPhase) {
+                GamePhase.PLACEMENT -> PlacementPhase(viewModel)
+                GamePhase.BATTLE -> BattlePhase(viewModel)
+                GamePhase.FINISHED -> FinishedPhase(viewModel)
+            }
+        }
+
+        // 2) Overlay della transizione cinematografica
+        PhaseTransitionOverlay(phase)
+    }
+}
+@Composable
+fun PhaseTransitionOverlay(phase: GamePhase) {
+    var visible by remember { mutableStateOf(true) }
+
+    // Fa partire l’animazione ogni volta che cambia fase
+    LaunchedEffect(phase) {
+        visible = true
+        delay(1000) // durata totale della transizione
+        visible = false
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(800)),
+        exit = fadeOut(tween(800))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center
+        ) {
+
+            // Animazione lenta della scritta
+            val scale by animateFloatAsState(
+                targetValue = if (visible) 1f else 0.8f,
+                animationSpec = tween(1600, easing = LinearOutSlowInEasing)
+            )
+
+            Text(
+                text = phase.name,
+                fontSize = 64.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White.copy(alpha = 0.9f),
+                modifier = Modifier.scale(scale)
+            )
+        }
+    }
+}
+
 @Composable
 fun NavalBattleScreen(gameViewModel: GameViewModel) {
     val gameState by gameViewModel.gameState.collectAsState()
@@ -56,13 +151,13 @@ fun NavalBattleScreen(gameViewModel: GameViewModel) {
             .background(BG)
             .padding(12.dp)
     ) {
-        when (gameState.phase) {
-            GamePhase.PLACEMENT -> PlacementPhase(gameViewModel)
-            GamePhase.BATTLE -> BattlePhase(gameViewModel)
-            GamePhase.FINISHED -> FinishedPhase(gameViewModel)
-        }
+        GamePhaseContainer(
+            phase = gameState.phase,
+            viewModel = gameViewModel
+        )
     }
 }
+
 
 // ------------------ PlacementPhase ------------------
 @Composable
@@ -70,7 +165,7 @@ fun PlacementPhase(gameViewModel: GameViewModel) {
     val gameState by gameViewModel.gameState.collectAsState()
     val density = LocalDensity.current
     // definisci le navi da piazzare (ordine: prima la da 2 poi le singole)
-    val shipsToPlace = listOf(2, 1, 1)
+    val shipsToPlace = listOf(3, 2, 1)
     val placedCount = gameState.player1.ships.size // quante sono già piazzate
 
     // Board metrics raccolte dalla GameBoard
@@ -234,6 +329,34 @@ fun DraggableShipItem(
                         initialPointerLocal = pointerOffset
                         dragOffset = Offset.Zero
                         onDragStart()
+
+                        // --- NUOVA PARTE: calcola subito la cella sotto il dito e richiama onDragCell
+                        // (in modo che la preview usi l'orientamento correntemente selezionato)
+                        val originStart = originOnDragStart
+                        val initialLocal = initialPointerLocal
+                        if (originStart != null && initialLocal != null && boardOffset != Offset.Unspecified && boardCellPx > 0f) {
+                            // posizione assoluta attuale del puntatore (window coords)
+                            val fingerAbsX = originInWindow.x + initialLocal.x
+                            val fingerAbsY = originInWindow.y + initialLocal.y
+
+                            // posizione relativa alla board
+                            val relX = fingerAbsX - boardOffset.x
+                            val relY = fingerAbsY - boardOffset.y
+
+                            val boardSizePx = boardCellPx * BOARD_GRID
+
+                            val insideBoard = relX >= 0f && relY >= 0f && relX < boardSizePx && relY < boardSizePx
+
+                            if (insideBoard) {
+                                val col = (relX / boardCellPx).toInt().coerceIn(0, BOARD_GRID - 1)
+                                val row = (relY / boardCellPx).toInt().coerceIn(0, BOARD_GRID - 1)
+                                lastCell = row to col
+                                onDragCell(row, col)
+                            } else {
+                                lastCell = null
+                                onDragExit()
+                            }
+                        }
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
@@ -248,7 +371,6 @@ fun DraggableShipItem(
                         }
 
                         // calcola posizione assoluta del puntatore (window coordinates)
-                        // fingerAbs = originOnDragStart + initialPointerLocal + dragOffset
                         val fingerAbsX = originInWindow.x + dragOffset.x + change.position.x
                         val fingerAbsY = originInWindow.y + dragOffset.y + change.position.y
 
@@ -294,6 +416,7 @@ fun DraggableShipItem(
                     }
                 )
             }
+
             .size(CELL_SIZE * size, CELL_SIZE)
     ) {
         // semplice disegno della nave nella banchina (coerente con ShipDrawing)
@@ -508,11 +631,96 @@ fun PlacementPreviewDrawing(preview: PlacementPreview, cellSize: Dp) {
 @Composable
 fun HitMissMarker(cell: Cell, cellSize: Dp) {
     Box(modifier = Modifier.size(cellSize), contentAlignment = Alignment.Center) {
+
         when (cell.status) {
-            CellStatus.HIT -> Text("💥", fontSize = 28.sp)
-            CellStatus.MISS -> Text("❌", fontSize = 20.sp)
-            else -> { /* nothing */ }
+
+            CellStatus.HIT -> {
+                // pulsazione infinita
+                val scale by rememberInfiniteTransition().animateFloat(
+                    initialValue = 0.8f,
+                    targetValue = 1.2f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(400),
+                        repeatMode = RepeatMode.Reverse
+                    )
+                )
+
+                AnimatedVisibility(
+                    visible = true,
+                    enter = scaleIn(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioHighBouncy,
+                            stiffness = Spring.StiffnessLow
+                        )
+                    )
+                ) {
+                    Text(
+                        "💥",
+                        fontSize = 28.sp,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                    )
+                }
+            }
+
+            CellStatus.MISS -> {
+                WaterSplash(cellSize)
+            }
+
+            else -> Unit
         }
+    }
+}
+
+
+@Composable
+fun WaterSplash(cellSize: Dp) {
+    var animationDone by remember { mutableStateOf(false) }
+
+    // Animazione Onda (solo all'inizio)
+    val waveScale by animateFloatAsState(
+        targetValue = if (!animationDone) 2f else 1f,
+        animationSpec = tween(450),
+    )
+
+    val waveAlpha by animateFloatAsState(
+        targetValue = if (!animationDone) 0f else 0f, // sparisce
+        animationSpec = tween(450),
+        finishedListener = {
+            animationDone = true
+        }
+    )
+
+    Box(
+        modifier = Modifier
+            .size(cellSize)
+            .padding(4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+
+        // 🔵 ONDA D'ACQUA
+        if (!animationDone) {
+            Box(
+                modifier = Modifier
+                    .size(cellSize)
+                    .graphicsLayer {
+                        scaleX = waveScale
+                        scaleY = waveScale
+                        alpha = waveAlpha
+                    }
+                    .background(
+                        color = Color(0x5533AFFF),
+                        shape = RoundedCornerShape(50)
+                    )
+            )
+        }
+
+        Text(
+            "❌",
+            fontSize = 28.sp
+        )
     }
 }
 

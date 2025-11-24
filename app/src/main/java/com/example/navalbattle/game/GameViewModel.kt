@@ -18,8 +18,8 @@ class GameViewModel : ViewModel() {
     // --- CORREZIONE QUI ---
     // Definite le configurazioni delle navi come proprietà private della classe,
     // in modo che siano accessibili da tutte le funzioni interne.
-    private val shipsToPlace = listOf(2, 1, 1)
-    private val SHIP_CONFIG = listOf(2, 1, 1)
+    private val shipsToPlace = listOf(3, 2, 1)
+    private val SHIP_CONFIG = listOf(3, 2, 1)
 
 
     private val _gameState = MutableStateFlow(createInitialGameState())
@@ -65,18 +65,34 @@ class GameViewModel : ViewModel() {
 
 
 
+    // In GameViewModel.kt
+
     fun rotateShip() {
         if (_gameState.value.phase == GamePhase.PLACEMENT) {
-            currentShipOrientation = if (currentShipOrientation == ShipOrientation.HORIZONTAL)
-                ShipOrientation.VERTICAL else ShipOrientation.HORIZONTAL
+
+            // Cambia orientamento
+            currentShipOrientation =
+                if (currentShipOrientation == ShipOrientation.HORIZONTAL)
+                    ShipOrientation.VERTICAL
+                else ShipOrientation.HORIZONTAL
+
+            // Rigenera la preview con il nuovo orientamento
+            _gameState.value.placementPreview?.let { preview ->
+                val (r, c) = preview.coordinates.firstOrNull() ?: return@let
+                updatePlacementPreview(r, c)
+            }
         }
     }
+
+
 
     fun resetGame() {
         placementIndex = 0
         currentShipOrientation = ShipOrientation.HORIZONTAL
         _gameState.value = createInitialGameState()
     }
+
+    // in GameViewModel.kt
 
     fun updatePlacementPreview(row: Int, col: Int) {
         if (_gameState.value.phase != GamePhase.PLACEMENT || placementIndex >= shipsToPlace.size) {
@@ -96,14 +112,13 @@ class GameViewModel : ViewModel() {
 
         val isValid = canPlaceShip(grid, row, col, shipSize, isHorizontal)
 
-        _gameState.update {
-            it.copy(
-                placementPreview = PlacementPreview(
-                    coordinates = previewCoords,
-                    isValid = isValid
-                )
-            )
-        }
+        val preview = PlacementPreview(
+            coordinates = previewCoords,
+            isValid = isValid,
+            orientation = currentShipOrientation // <-- Aggiunta fondamentale
+        )
+
+        _gameState.update { it.copy(placementPreview = preview) }
     }
 
     fun clearPlacementPreview() {
