@@ -71,5 +71,7 @@ data class GameState(
     val phase: GamePhase = GamePhase.PLACEMENT,
     val winner: Player? = null,
     val sunkMessage: String? = null, // Messaggio per "Nave affondata!"
-    val placementPreview: PlacementPreview? = null // Contiene le info per l'anteprima
+    val placementPreview: PlacementPreview? = null,// Contiene le info per l'anteprima
+    val isComputerThinking: Boolean = false,
+    val draggedShipSize: Int? = null
 )

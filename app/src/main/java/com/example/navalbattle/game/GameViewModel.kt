@@ -11,15 +11,17 @@ import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 private const val TAG = "GameViewModel"
-
-// --- CORREZIONE QUI ---
-// Spostata la definizione di GRID_SIZE a livello di file (top-level)
-// in modo che sia accessibile da tutte le funzioni.
 private const val GRID_SIZE = 5
 
 class GameViewModel : ViewModel() {
 
+    // --- CORREZIONE QUI ---
+    // Definite le configurazioni delle navi come proprietà private della classe,
+    // in modo che siano accessibili da tutte le funzioni interne.
     private val shipsToPlace = listOf(2, 1, 1)
+    private val SHIP_CONFIG = listOf(2, 1, 1)
+
+
     private val _gameState = MutableStateFlow(createInitialGameState())
     val gameState = _gameState.asStateFlow()
 
@@ -43,6 +45,26 @@ class GameViewModel : ViewModel() {
         }
     }
 
+    fun onDragMove(row: Int, col: Int) {
+        updatePlacementPreview(row, col)
+    }
+    fun onDragEnd(row: Int?, col: Int?) {
+        // Se rilasci fuori → reset anteprima
+        if (row == null || col == null) {
+            clearPlacementPreview()
+            return
+        }
+
+        // Tenta di posizionare
+        placeShipForHuman(row, col)
+
+        // Sempre cancella l’anteprima
+        clearPlacementPreview()
+    }
+
+
+
+
     fun rotateShip() {
         if (_gameState.value.phase == GamePhase.PLACEMENT) {
             currentShipOrientation = if (currentShipOrientation == ShipOrientation.HORIZONTAL)
@@ -61,16 +83,27 @@ class GameViewModel : ViewModel() {
             clearPlacementPreview()
             return
         }
+
         val shipSize = shipsToPlace[placementIndex]
         val isHorizontal = currentShipOrientation == ShipOrientation.HORIZONTAL
         val grid = _gameState.value.player1.grid
-        val previewCoordinates = (0 until shipSize).map { i ->
+
+        val previewCoords = (0 until shipSize).map { i ->
             val r = if (isHorizontal) row else row + i
             val c = if (isHorizontal) col + i else col
             r to c
         }
-        val isValid = previewCoordinates.all { (r, c) -> canPlaceShip(grid, r, c, 1, false) }
-        _gameState.update { it.copy(placementPreview = PlacementPreview(previewCoordinates, isValid)) }
+
+        val isValid = canPlaceShip(grid, row, col, shipSize, isHorizontal)
+
+        _gameState.update {
+            it.copy(
+                placementPreview = PlacementPreview(
+                    coordinates = previewCoords,
+                    isValid = isValid
+                )
+            )
+        }
     }
 
     fun clearPlacementPreview() {
@@ -207,35 +240,52 @@ class GameViewModel : ViewModel() {
     }
 
     private fun placeShipsRandomly(grid: MutableList<MutableList<Cell>>): List<Ship> {
-        val ships = mutableListOf<Ship>()
-        val maxAttempts = 100
-        shipsToPlace.forEach { size ->
-            var placed = false
-            var attempts = 0
-            while (!placed && attempts < maxAttempts) {
-                val row = Random.nextInt(GRID_SIZE)
-                val col = Random.nextInt(GRID_SIZE)
-                val horizontal = Random.nextBoolean()
-                if (canPlaceShip(grid, row, col, size, horizontal)) {
-                    val coords = (0 until size).map { i ->
-                        val r = if (horizontal) row else row + i
-                        val c = if (horizontal) col + i else col
-                        grid[r][c] = grid[r][c].copy(status = CellStatus.SHIP)
-                        r to c
+        while (true) {
+            val ships = mutableListOf<Ship>()
+            var allShipsPlaced = true
+
+            // Ora il ciclo 'for' funziona perché SHIP_CONFIG è accessibile.
+            for (size in SHIP_CONFIG) {
+                var shipPlaced = false
+                var attempts = 0
+                val maxAttempts = 200
+
+                while (!shipPlaced && attempts < maxAttempts) {
+                    val row = Random.nextInt(GRID_SIZE)
+                    val col = Random.nextInt(GRID_SIZE)
+                    val isHorizontal = Random.nextBoolean()
+
+                    if (canPlaceShip(grid, row, col, size, isHorizontal)) {
+                        val coords = (0 until size).map { i ->
+                            val r = if (isHorizontal) row else row + i
+                            val c = if (isHorizontal) col + i else col
+                            grid[r][c] = grid[r][c].copy(status = CellStatus.SHIP)
+                            r to c
+                        }
+                        val orientation = if (isHorizontal) ShipOrientation.HORIZONTAL else ShipOrientation.VERTICAL
+                        ships.add(Ship(size, coords, orientation))
+                        shipPlaced = true
                     }
-                    ships += Ship(size, coords, if (horizontal) ShipOrientation.HORIZONTAL else ShipOrientation.VERTICAL)
-                    placed = true
+                    attempts++
                 }
-                attempts++
+
+                if (!shipPlaced) {
+                    allShipsPlaced = false
+                    break
+                }
             }
-            if (!placed) {
-                grid.forEachIndexed { r, rowList ->
-                    rowList.forEachIndexed { c, _ -> grid[r][c] = grid[r][c].copy(status = CellStatus.EMPTY) }
+
+            if (allShipsPlaced) {
+                return ships
+            } else {
+                Log.w(TAG, "Placement failed, resetting grid and trying again...")
+                grid.forEach { row ->
+                    row.indices.forEach { colIndex ->
+                        row[colIndex] = row[colIndex].copy(status = CellStatus.EMPTY)
+                    }
                 }
-                return placeShipsRandomly(grid)
             }
         }
-        return ships
     }
 
     private fun canPlaceShip(grid: List<List<Cell>>, row: Int, col: Int, size: Int, horizontal: Boolean): Boolean {
